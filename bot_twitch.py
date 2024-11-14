@@ -314,7 +314,8 @@ async def show_streamer_info(callback_query: types.CallbackQuery, callback_data:
         info_message = (
             f"Статус: {status_text}\n"
             f"Последняя трансляция: {last_stream_date}\n"
-            f"Длительность последней трансляции: {duration_str}"
+            f"Длительность последней трансляции: {duration_str}\n"
+            f"https://www.twitch.tv/{streamer_name}"
         )
         keyboard = InlineKeyboardMarkup()
         keyboard.add(
