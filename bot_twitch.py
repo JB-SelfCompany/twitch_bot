@@ -41,14 +41,12 @@ settings_file = 'settings.ini'
 
 if not config.read(settings_file):
     print("Файл settings.ini не найден. Пожалуйста, введите необходимые данные.")
-    BOT_TOKEN = input("Введите токен телеграмм бота: ").strip()
-    CHAT_ID = input("Введите ваш телеграмм ID: ").strip()
-
+    BOT_TOKEN = input("Введите BOT_TOKEN: ").strip()
+    CHAT_ID = input("Введите CHAT_ID: ").strip()
     config['DEFAULT'] = {
         'BOT_TOKEN': BOT_TOKEN,
         'CHAT_ID': CHAT_ID
     }
-
     with open(settings_file, 'w', encoding='utf-8') as configfile:
         config.write(configfile)
     print("Настройки сохранены в settings.ini")
@@ -71,10 +69,11 @@ def load_data():
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         data = {}
-    # Добавляем 'notified_live' для каждого стримера, если отсутствует
     for streamer in data.values():
         if 'notified_live' not in streamer:
             streamer['notified_live'] = False
+        if 'offline_checks' not in streamer:
+            streamer['offline_checks'] = 0
     return data
 
 def save_data(data):
@@ -93,7 +92,8 @@ def add_streamer(streamer_name):
             'is_live': False,
             'last_stream_start': None,
             'last_stream_end': None,
-            'notified_live': False  # Новый флаг
+            'notified_live': False,
+            'offline_checks': 0
         }
         save_data(data)
         logger.info(f"Streamer {streamer_name} added to tracking.")
@@ -116,36 +116,60 @@ def remove_streamer(streamer_name):
 def get_streamers():
     return list(data.keys())
 
-async def check_streamer(streamer_name):
+async def fetch_stream_status(session, streamer_name):
     headers = {
         'User-Agent': 'Mozilla/5.0'
     }
     try:
-        async with aiohttp.ClientSession() as session:
-            url = f'https://www.twitch.tv/{streamer_name}'
-            async with session.get(url, headers=headers) as response:
+        async with session.get(f'https://www.twitch.tv/{streamer_name}', headers=headers) as response:
+            if response.status == 200:
                 html = await response.text()
-                if re.search(r'"isLiveBroadcast":\s*true', html):
-                    logger.info(f"Стример {streamer_name} в эфире")
-                    if not data[streamer_name]['is_live']:
-                        data[streamer_name]['is_live'] = True
-                        data[streamer_name]['last_stream_start'] = datetime.now().isoformat()
-                        data[streamer_name]['notified_live'] = True
-                        save_data(data)
-                        await bot.send_message(CHAT_ID, f'Стример {streamer_name} сейчас в эфире!\nhttps://www.twitch.tv/{streamer_name}')
+                match = re.search(r'"isLiveBroadcast":\s*true', html)
+                if match:
+                    return True
                 else:
-                    logger.info(f"Стример {streamer_name} не в эфире")
-                    if data[streamer_name]['is_live']:
-                        last_stream_start = datetime.fromisoformat(data[streamer_name]['last_stream_start'])
-                        stream_duration = datetime.now() - last_stream_start
-                        data[streamer_name]['is_live'] = False
-                        data[streamer_name]['last_stream_end'] = datetime.now().isoformat()
-                        data[streamer_name]['notified_live'] = False
-                        save_data(data)
-                        duration_str = str(stream_duration).split('.')[0]
-                        await bot.send_message(CHAT_ID, f'Стример {streamer_name} закончил трансляцию. Длительность стрима: {duration_str}')
+                    return False
+            else:
+                logger.error(f"Ошибка запроса страницы стримера {streamer_name}: {response.status}")
+                return None
     except Exception as e:
-        logger.error(f'Ошибка при проверке стримера {streamer_name}: {e}')
+        logger.error(f"Ошибка при запросе статуса стримера {streamer_name}: {e}")
+        return None
+
+async def check_streamer_in_session(streamer_name, session):
+    is_live = await fetch_stream_status(session, streamer_name)
+    if is_live is None:
+        return
+    streamer_data = data[streamer_name]
+    if is_live:
+        logger.info(f"Стример {streamer_name} в эфире")
+        streamer_data['offline_checks'] = 0
+        if not streamer_data['is_live']:
+            streamer_data['is_live'] = True
+            streamer_data['last_stream_start'] = datetime.now().isoformat()
+            streamer_data['notified_live'] = True
+            save_data(data)
+            await bot.send_message(CHAT_ID, f'Стример {streamer_name} сейчас в эфире!\nhttps://www.twitch.tv/{streamer_name}')
+        elif not streamer_data['notified_live']:
+            streamer_data['notified_live'] = True
+            save_data(data)
+            await bot.send_message(CHAT_ID, f'Стример {streamer_name} сейчас в эфире!\nhttps://www.twitch.tv/{streamer_name}')
+    else:
+        if streamer_data['is_live']:
+            streamer_data['offline_checks'] += 1
+            logger.info(f"Стример {streamer_name} не в эфире. Проверка {streamer_data['offline_checks']}/3")
+            if streamer_data['offline_checks'] >= 3:
+                last_stream_start = datetime.fromisoformat(streamer_data['last_stream_start'])
+                stream_duration = datetime.now() - last_stream_start
+                streamer_data['is_live'] = False
+                streamer_data['last_stream_end'] = datetime.now().isoformat()
+                streamer_data['notified_live'] = False
+                streamer_data['offline_checks'] = 0
+                save_data(data)
+                duration_str = str(stream_duration).split('.')[0]
+                await bot.send_message(CHAT_ID, f'Стример {streamer_name} закончил трансляцию. Длительность стрима: {duration_str}')
+        else:
+            streamer_data['offline_checks'] = 0
 
 async def check_streamers():
     while True:
@@ -157,40 +181,7 @@ async def check_streamers():
                     await asyncio.sleep(1)
                 except Exception as e:
                     logger.error(f'Ошибка при проверке стримера {streamer}: {e}')
-        await asyncio.sleep(60)
-
-async def check_streamer_in_session(streamer_name, session):
-    headers = {
-        'User-Agent': 'Mozilla/5.0'
-    }
-    url = f'https://www.twitch.tv/{streamer_name}'
-    async with session.get(url, headers=headers) as response:
-        html = await response.text()
-        if re.search(r'"isLiveBroadcast":\s*true', html):
-            logger.info(f"Стример {streamer_name} в эфире")
-            if not data[streamer_name]['is_live']:
-                # Стример только что начал стрим
-                data[streamer_name]['is_live'] = True
-                data[streamer_name]['last_stream_start'] = datetime.now().isoformat()
-                data[streamer_name]['notified_live'] = True
-                save_data(data)
-                await bot.send_message(CHAT_ID, f'Стример {streamer_name} сейчас в эфире!\nhttps://www.twitch.tv/{streamer_name}')
-            elif not data[streamer_name]['notified_live']:
-                # Бот перезапустился, а стример все еще в эфире, но уведомление не отправлено
-                data[streamer_name]['notified_live'] = True
-                save_data(data)
-                await bot.send_message(CHAT_ID, f'Стример {streamer_name} сейчас в эфире!\nhttps://www.twitch.tv/{streamer_name}')
-        else:
-            logger.info(f"Стример {streamer_name} не в эфире")
-            if data[streamer_name]['is_live']:
-                last_stream_start = datetime.fromisoformat(data[streamer_name]['last_stream_start'])
-                stream_duration = datetime.now() - last_stream_start
-                data[streamer_name]['is_live'] = False
-                data[streamer_name]['last_stream_end'] = datetime.now().isoformat()
-                data[streamer_name]['notified_live'] = False
-                save_data(data)
-                duration_str = str(stream_duration).split('.')[0]
-                await bot.send_message(CHAT_ID, f'Стример {streamer_name} закончил трансляцию. Длительность стрима: {duration_str}')
+        await asyncio.sleep(120)
 
 menu_cb = CallbackData('menu', 'action')
 streamer_cb = CallbackData('streamer', 'name', 'action')
@@ -228,7 +219,8 @@ async def process_streamer_name(message: types.Message, state: FSMContext):
             logger.error(f"Ошибка при редактировании сообщения: {e}")
             await message.answer(f"Стример {streamer_name} добавлен для отслеживания.")
         logger.info(f"Пользователь {message.from_user.id} добавил стримера {streamer_name}")
-        await check_streamer(streamer_name)
+        async with aiohttp.ClientSession() as session:
+            await check_streamer_in_session(streamer_name, session)
     else:
         try:
             await bot.edit_message_text(
@@ -240,7 +232,6 @@ async def process_streamer_name(message: types.Message, state: FSMContext):
             logger.error(f"Ошибка при редактировании сообщения: {e}")
             await message.answer(f"Стример {streamer_name} уже отслеживается.")
     await state.finish()
-    # Возвращаем главное меню, редактируя текущее сообщение
     keyboard = InlineKeyboardMarkup()
     keyboard.add(
         InlineKeyboardButton("Добавить стримера", callback_data=menu_cb.new(action='add_streamer')),
@@ -259,13 +250,11 @@ async def list_streamers_handler(callback_query: types.CallbackQuery):
         await callback_query.message.edit_text("Список стримеров пуст.", reply_markup=keyboard)
         await callback_query.answer()
         return
-
     for streamer in streamers:
-        # Добавляем значок, если стример в эфире
         streamer_info = data.get(streamer, {})
         is_live = streamer_info.get('is_live', False)
         if is_live:
-            button_text = f"✅ {streamer}"
+            button_text = f"🟢 {streamer}"
         else:
             button_text = streamer
         keyboard.add(
@@ -315,7 +304,7 @@ async def show_streamer_info(callback_query: types.CallbackQuery, callback_data:
             f"Статус: {status_text}\n"
             f"Последняя трансляция: {last_stream_date}\n"
             f"Длительность последней трансляции: {duration_str}\n"
-            f"https://www.twitch.tv/{streamer_name}"
+            f"Ссылка: https://www.twitch.tv/{streamer_name}"
         )
         keyboard = InlineKeyboardMarkup()
         keyboard.add(
@@ -336,7 +325,6 @@ async def confirm_delete_streamer(callback_query: types.CallbackQuery, callback_
     streamer_name = callback_data['name']
     logger.info(f"Пользователь {callback_query.from_user.id} пытается удалить стримера {streamer_name}")
     if remove_streamer(streamer_name):
-        # Перезаписываем текущее сообщение, сообщая об удалении и показывая главное меню
         keyboard = InlineKeyboardMarkup()
         keyboard.add(
             InlineKeyboardButton("Добавить стримера", callback_data=menu_cb.new(action='add_streamer')),
