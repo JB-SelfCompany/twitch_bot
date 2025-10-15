@@ -1,16 +1,25 @@
 [Unit]
-Description=Bots Service
-After=network.target
+Description=Twitch Notification Bot
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-#Укажите пользователя, под которым будет запускаться сервис
-User=your_user
-#Укажите рабочую директорию, в которой расположен бот
-WorkingDirectory=/home/your_user/bot
-ExecStart=/bin/bash -c 'source /home/your_user/env/bin/activate && /home/your_user/env/bin/python3.11 bot_*.py'
+User=user
+Group=user
+WorkingDirectory=/home/user/bot_twitch
+
+# Execute bot
+ExecStart=/bin/bash -c 'source /home/user/.pyenv/versions/3.13.5/envs/env/bin/activate && cd /home/user/bot_twitch && /home/user/.pyenv/versions/3.13.5/envs/env/bin/python3.13 bot_main.py'
+
+# Restart configuration
 Restart=always
-RestartSec=5
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=twitch_bot
 
 [Install]
 WantedBy=multi-user.target
