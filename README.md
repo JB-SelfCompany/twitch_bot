@@ -78,7 +78,7 @@ CHECK_INTERVAL=120
 ### 4. Запуск
 
 ```bash
-python main.py
+python bot_main.py
 ```
 
 ## Использование
