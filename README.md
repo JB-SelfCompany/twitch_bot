@@ -1,13 +1,14 @@
-# <div align="center"> 🤖 Twitch Notification Bot
-
 <div align="center">
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python)](https://www.python.org/)
-[![Telegram](https://img.shields.io/badge/Telegram-Bot-blue?logo=telegram)](https://telegram.org/)
-[![aiogram](https://img.shields.io/badge/aiogram-3.x-blue)](https://docs.aiogram.dev/)
+# 📺 Twitch Notification Bot
 
-Telegram бот для отслеживания стримеров на Twitch с автоматическими уведомлениями о начале и окончании трансляций.
+Telegram бот для отслеживания стримеров на Twitch
+
+[![License](https://img.shields.io/github/license/JB-SelfCompany/twitch_bot)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
+[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=JB-SelfCompany.twitch_bot)](https://github.com/JB-SelfCompany/twitch_bot)
+
+**[English](README.en.md) | [Русский](#)**
 
 </div>
 
@@ -141,10 +142,6 @@ sudo systemctl restart twitch_bot
 
 <div align="center">
 
-**Сделано с ❤️ для open-source сообщества**
-
-⭐ Если проект вам помог, поставьте звезду на GitHub!
-
-[Наверх](#-возможности)
+Made with ❤️ by <a href="https://github.com/JB-SelfCompany">JB-SelfCompany</a>
 
 </div>
